@@ -1,5 +1,7 @@
 package db
 
+import "chat-poc/entity"
+
 func SaveMessage(username, content string) error {
 	stmt, err := db.Prepare("INSERT INTO messages(username, content) VALUES(?, ?)")
 	if err != nil {
@@ -11,17 +13,18 @@ func SaveMessage(username, content string) error {
 	return err
 }
 
-func GetMessages(limit int) ([]Message, error) {
+func GetMessages(limit int) ([]entity.Message, error) {
 	rows, err := db.Query("SELECT id, username, content, timestamp FROM messages ORDER BY timestamp DESC LIMIT ?", limit)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	var messages []Message
+	var messages []entity.Message
 	for rows.Next() {
-		var msg Message
-		if err := rows.Scan(&msg.ID, &msg.Username, &msg.Content, &msg.Timestamp); err != nil {
+		var msg entity.Message
+		var id int
+		if err := rows.Scan(&id, &msg.Username, &msg.Content, &msg.Timestamp); err != nil {
 			return nil, err
 		}
 		messages = append(messages, msg)

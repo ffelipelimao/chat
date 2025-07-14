@@ -86,7 +86,6 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("Error upgrading to WebSocket: %v", err)
 		return
 	}
-	defer conn.Close()
 
 	client := &WSClient{conn: conn, send: make(chan []byte, 256)}
 	clients[client] = true
@@ -100,6 +99,9 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	mqtt.PublishUserStatus(username, true)
 	userstatus.SetUserOnline(username) // Atualiza o status localmente também
 
+	// Envia atualização de status para todos os clientes
+	statusUpdates <- userstatus.GetOnlineUsers()
+
 	// Envia mensagens existentes para o novo cliente
 	messages, err := db.GetMessages(50) // Busca as últimas 50 mensagens
 	if err != nil {
@@ -107,15 +109,33 @@ func wsHandler(w http.ResponseWriter, r *http.Request) {
 	} else {
 		for i := len(messages) - 1; i >= 0; i-- { // Envia em ordem cronológica
 			msgPayload, _ := json.Marshal(messages[i])
-			client.conn.WriteMessage(websocket.TextMessage, msgPayload)
+			client.send <- msgPayload
 		}
 	}
 
-	defer func() {
-		delete(clients, client)
-		log.Printf("WebSocket client disconnected: %s", conn.RemoteAddr().String())
-		mqtt.PublishUserStatus(username, false) // Publica que o usuário está offline
-		userstatus.SetUserOffline(username)     // Atualiza o status localmente
+	// Inicia goroutine para escrever mensagens para este cliente
+	go func() {
+		defer func() {
+			conn.Close()
+			delete(clients, client)
+			log.Printf("WebSocket client disconnected: %s", conn.RemoteAddr().String())
+			mqtt.PublishUserStatus(username, false) // Publica que o usuário está offline
+			userstatus.SetUserOffline(username)     // Atualiza o status localmente
+
+			// Envia atualização de status para todos os clientes restantes
+			statusUpdates <- userstatus.GetOnlineUsers()
+		}()
+
+		for {
+			select {
+			case message := <-client.send:
+				err := conn.WriteMessage(websocket.TextMessage, message)
+				if err != nil {
+					log.Printf("Error writing to WebSocket client %s: %v", conn.RemoteAddr().String(), err)
+					return
+				}
+			}
+		}
 	}()
 
 	for {
@@ -176,9 +196,12 @@ func handleMessages() {
 		}
 
 		for client := range clients {
-			err := client.conn.WriteMessage(websocket.TextMessage, msgPayload)
-			if err != nil {
-				log.Printf("Error writing to WebSocket client %s: %v", client.conn.RemoteAddr().String(), err)
+			select {
+			case client.send <- msgPayload:
+				// Mensagem enviada com sucesso
+			default:
+				// Canal cheio, remove o cliente
+				log.Printf("Client send channel full, removing client: %s", client.conn.RemoteAddr().String())
 				client.conn.Close()
 				delete(clients, client)
 			}
@@ -200,9 +223,12 @@ func handleStatusUpdates() {
 		}
 
 		for client := range clients {
-			err := client.conn.WriteMessage(websocket.TextMessage, payload)
-			if err != nil {
-				log.Printf("Error writing user status to WebSocket client %s: %v", client.conn.RemoteAddr().String(), err)
+			select {
+			case client.send <- payload:
+				// Mensagem enviada com sucesso
+			default:
+				// Canal cheio, remove o cliente
+				log.Printf("Client send channel full, removing client: %s", client.conn.RemoteAddr().String())
 				client.conn.Close()
 				delete(clients, client)
 			}

@@ -39,7 +39,7 @@ func SetUserOffline(username string) {
 	delete(onlineUsers, username)
 }
 
-// statusHandler lida com as mensagens de status de usuário do MQTT
+// StatusHandler lida com as mensagens de status de usuário do MQTT
 func StatusHandler(client mqtt.Client, msg mqtt.Message) {
 	var status struct {
 		Username string `json:"username"`
@@ -57,5 +57,4 @@ func StatusHandler(client mqtt.Client, msg mqtt.Message) {
 		SetUserOffline(status.Username)
 		log.Printf("User %s is now offline.", status.Username)
 	}
-	statusUpdates <- GetOnlineUsers()
 }

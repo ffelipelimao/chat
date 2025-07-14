@@ -3,18 +3,9 @@ package db
 import (
 	"database/sql"
 	"log"
-	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 )
-
-// Message representa uma mensagem de chat
-type Message struct {
-	ID        int
-	Username  string
-	Content   string
-	Timestamp time.Time
-}
 
 var db *sql.DB
 

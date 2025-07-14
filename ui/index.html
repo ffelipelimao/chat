@@ -62,13 +62,27 @@
                 messageInput.disabled = false;
                 sendButton.disabled = false;
                 fetchOnlineUsers(); // Busca usuários online ao conectar
+                loadHistoricalMessages(); // Carrega mensagens históricas ao conectar
                 setInterval(fetchOnlineUsers, 5000); // Atualiza usuários online a cada 5 segundos
             };
 
             ws.onmessage = function(event) {
+                console.log('Received WebSocket message:', event.data);
                 const data = JSON.parse(event.data);
-                if (data.username && data.content) {
+                console.log('Parsed data:', data);
+                
+                if (data.type === 'user_status') {
+                    // Atualiza lista de usuários online
+                    console.log('Updating user status:', data.onlineUsers);
+                    updateOnlineUsers(data.onlineUsers);
+                } else if (data.Username && data.Content) {
+                    console.log('Displaying message:', data.Username, data.Content, data.Timestamp);
+                    displayMessage(data.Username, data.Content, data.Timestamp);
+                } else if (data.username && data.content) {
+                    console.log('Displaying message:', data.username, data.content, data.timestamp);
                     displayMessage(data.username, data.content, data.timestamp);
+                } else {
+                    console.log('Unknown message format:', data);
                 }
             };
 
@@ -118,31 +132,41 @@
             fetch('/status')
                 .then(response => response.json())
                 .then(data => {
-                    usersOnlineDiv.innerHTML = '';
-                    const onlineUsernames = Object.keys(data).filter(username => data[username]);
-                    if (onlineUsernames.length === 0) {
-                        usersOnlineDiv.innerHTML = 'Nenhum usuário online.';
-                    } else {
-                        onlineUsernames.forEach(username => {
-                            const userElement = document.createElement('div');
-                            userElement.textContent = username;
-                            usersOnlineDiv.appendChild(userElement);
-                        });
-                    }
+                    updateOnlineUsers(data);
                 })
                 .catch(error => console.error('Erro ao buscar usuários online:', error));
         }
 
-        // Carregar mensagens históricas ao carregar a página
-        window.onload = function() {
+        function updateOnlineUsers(usersMap) {
+            usersOnlineDiv.innerHTML = '';
+            const onlineUsernames = Object.keys(usersMap).filter(username => usersMap[username]);
+            if (onlineUsernames.length === 0) {
+                usersOnlineDiv.innerHTML = 'Nenhum usuário online.';
+            } else {
+                onlineUsernames.forEach(username => {
+                    const userElement = document.createElement('div');
+                    userElement.textContent = username;
+                    usersOnlineDiv.appendChild(userElement);
+                });
+            }
+        }
+
+        function loadHistoricalMessages() {
             fetch('/messages')
                 .then(response => response.json())
                 .then(messages => {
+                    // Limpa o chatbox antes de carregar as mensagens históricas
+                    chatbox.innerHTML = '';
                     messages.reverse().forEach(msg => { // Exibir em ordem cronológica
                         displayMessage(msg.Username, msg.Content, msg.Timestamp);
                     });
                 })
                 .catch(error => console.error('Erro ao carregar mensagens históricas:', error));
+        }
+
+        // Carregar mensagens históricas ao carregar a página (apenas se não estiver conectado)
+        window.onload = function() {
+            // Não carrega mensagens aqui, elas serão carregadas quando conectar ao WebSocket
         };
     </script>
 </body>
