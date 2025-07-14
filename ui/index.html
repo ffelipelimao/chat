@@ -122,6 +122,15 @@
                 } else if (topic === STATUS_TOPIC) {
                     const data = JSON.parse(message.toString());
                     handleUserStatus(data);
+                    // Exibe mensagem de sistema no chat
+                    if (data.username && typeof data.online === 'boolean') {
+                        let now = new Date();
+                        let timeString = now.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                        let statusMsg = data.online ? 'ficou online' : 'ficou offline';
+                        displaySystemMessage(`${data.username} ${statusMsg}`, timeString);
+                    }
+                    // Atualiza o histórico de atividades em tempo real
+                    loadUserActivity();
                 }
             });
 
@@ -282,6 +291,16 @@
         window.onload = function() {
             loadUserActivity();
         };
+
+        // Exibe mensagem de sistema no chat
+        function displaySystemMessage(content, timeString) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message');
+            messageElement.style.color = '#888';
+            messageElement.innerHTML = `<span class="username">[sistema]</span> ${content} <span class="timestamp">(${timeString})</span>`;
+            chatbox.appendChild(messageElement);
+            chatbox.scrollTop = chatbox.scrollHeight;
+        }
     </script>
 </body>
 </html>
