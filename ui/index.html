@@ -1,0 +1,149 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Go Chat Demo</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        #chatbox { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
+        #messageInput { width: calc(100% - 120px); padding: 8px; }
+        #sendButton { padding: 8px 15px; }
+        #usernameInput { padding: 8px; margin-bottom: 10px; }
+        #usersOnline { border: 1px solid #eee; padding: 10px; background-color: #f9f9f9; }
+        .message { margin-bottom: 5px; }
+        .username { font-weight: bold; }
+        .timestamp { font-size: 0.8em; color: #888; margin-left: 5px; }
+    </style>
+</head>
+<body>
+    <h1>Go Chat Demo</h1>
+
+    <div>
+        <label for="usernameInput">Seu Nome de Usuário:</label>
+        <input type="text" id="usernameInput" value="Usuário" />
+        <button onclick="connectWebSocket()">Conectar</button>
+    </div>
+
+    <hr/>
+
+    <h2>Chat</h2>
+    <div id="chatbox"></div>
+    <input type="text" id="messageInput" placeholder="Digite sua mensagem..." disabled />
+    <button id="sendButton" onclick="sendMessage()" disabled>Enviar</button>
+
+    <hr/>
+
+    <h2>Usuários Online</h2>
+    <div id="usersOnline">Nenhum usuário online.</div>
+
+    <script>
+        let ws;
+        const chatbox = document.getElementById('chatbox');
+        const messageInput = document.getElementById('messageInput');
+        const sendButton = document.getElementById('sendButton');
+        const usernameInput = document.getElementById('usernameInput');
+        const usersOnlineDiv = document.getElementById('usersOnline');
+
+        function connectWebSocket() {
+            const username = usernameInput.value;
+            if (!username) {
+                alert("Por favor, digite um nome de usuário.");
+                return;
+            }
+
+            // Fechar conexão existente, se houver
+            if (ws) {
+                ws.close();
+            }
+
+            ws = new WebSocket(`ws://localhost:8080/ws?username=${username}`);
+
+            ws.onopen = function() {
+                console.log('Conectado ao WebSocket');
+                messageInput.disabled = false;
+                sendButton.disabled = false;
+                fetchOnlineUsers(); // Busca usuários online ao conectar
+                setInterval(fetchOnlineUsers, 5000); // Atualiza usuários online a cada 5 segundos
+            };
+
+            ws.onmessage = function(event) {
+                const data = JSON.parse(event.data);
+                if (data.username && data.content) {
+                    displayMessage(data.username, data.content, data.timestamp);
+                }
+            };
+
+            ws.onclose = function() {
+                console.log('Desconectado do WebSocket');
+                messageInput.disabled = true;
+                sendButton.disabled = true;
+            };
+
+            ws.onerror = function(error) {
+                console.error('Erro no WebSocket:', error);
+            };
+        }
+
+        function displayMessage(username, content, timestamp) {
+            const messageElement = document.createElement('div');
+            messageElement.classList.add('message');
+
+            const date = new Date(timestamp);
+            const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+
+            messageElement.innerHTML = `<span class="username">${username}:</span> ${content} <span class="timestamp">(${timeString})</span>`;
+            chatbox.appendChild(messageElement);
+            chatbox.scrollTop = chatbox.scrollHeight; // Scroll para o final
+        }
+
+        function sendMessage() {
+            const message = messageInput.value;
+            const username = usernameInput.value;
+            if (message.trim() === '') return;
+
+            const chatMessage = {
+                username: username,
+                content: message
+            };
+            ws.send(JSON.stringify(chatMessage));
+            messageInput.value = '';
+        }
+
+        messageInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                sendMessage();
+            }
+        });
+
+        function fetchOnlineUsers() {
+            fetch('/status')
+                .then(response => response.json())
+                .then(data => {
+                    usersOnlineDiv.innerHTML = '';
+                    const onlineUsernames = Object.keys(data).filter(username => data[username]);
+                    if (onlineUsernames.length === 0) {
+                        usersOnlineDiv.innerHTML = 'Nenhum usuário online.';
+                    } else {
+                        onlineUsernames.forEach(username => {
+                            const userElement = document.createElement('div');
+                            userElement.textContent = username;
+                            usersOnlineDiv.appendChild(userElement);
+                        });
+                    }
+                })
+                .catch(error => console.error('Erro ao buscar usuários online:', error));
+        }
+
+        // Carregar mensagens históricas ao carregar a página
+        window.onload = function() {
+            fetch('/messages')
+                .then(response => response.json())
+                .then(messages => {
+                    messages.reverse().forEach(msg => { // Exibir em ordem cronológica
+                        displayMessage(msg.Username, msg.Content, msg.Timestamp);
+                    });
+                })
+                .catch(error => console.error('Erro ao carregar mensagens históricas:', error));
+        };
+    </script>
+</body>
+</html>

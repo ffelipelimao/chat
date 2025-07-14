@@ -1,0 +1,15 @@
+version: '3.8'
+
+services:
+  mqtt-broker:
+    image: eclipse-mosquitto:2.0.18 
+    container_name: mosquitto
+    ports:
+      - "1883:1883" 
+      - "9001:9001" 
+    volumes:
+      - ./mosquitto/config:/mosquitto/config # Onde seu mosquitto.conf estará
+      - ./mosquitto/data:/mosquitto/data     # Onde os dados persistentes serão armazenados
+      - ./mosquitto/log:/mosquitto/log       # Onde os logs serão armazenados
+    command: mosquitto -c /mosquitto/config/mosquitto.conf
+    restart: unless-stopped
