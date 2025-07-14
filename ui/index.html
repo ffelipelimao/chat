@@ -1,7 +1,8 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Go Chat Demo</title>
+    <title>Go Chat Demo - MQTT</title>
+    <script src="https://unpkg.com/mqtt/dist/mqtt.min.js"></script>
     <style>
         body { font-family: Arial, sans-serif; margin: 20px; }
         #chatbox { border: 1px solid #ccc; height: 300px; overflow-y: scroll; padding: 10px; margin-bottom: 10px; }
@@ -12,16 +13,22 @@
         .message { margin-bottom: 5px; }
         .username { font-weight: bold; }
         .timestamp { font-size: 0.8em; color: #888; margin-left: 5px; }
+        .status { padding: 5px; margin: 5px 0; border-radius: 3px; }
+        .connected { background-color: #d4edda; color: #155724; }
+        .disconnected { background-color: #f8d7da; color: #721c24; }
     </style>
 </head>
 <body>
-    <h1>Go Chat Demo</h1>
+    <h1>Go Chat Demo - MQTT</h1>
 
     <div>
         <label for="usernameInput">Seu Nome de Usuário:</label>
         <input type="text" id="usernameInput" value="Usuário" />
-        <button onclick="connectWebSocket()">Conectar</button>
+        <button onclick="connectMQTT()">Conectar</button>
+        <button onclick="disconnectMQTT()">Desconectar</button>
     </div>
+
+    <div id="connectionStatus" class="status disconnected">Desconectado</div>
 
     <hr/>
 
@@ -35,90 +42,166 @@
     <h2>Usuários Online</h2>
     <div id="usersOnline">Nenhum usuário online.</div>
 
+    <hr/>
+    <h2>Histórico de Atividades</h2>
+    <div id="userActivityBox">Carregando histórico...</div>
+
     <script>
-        let ws;
+        let mqttClient;
+        let currentUsername;
         const chatbox = document.getElementById('chatbox');
         const messageInput = document.getElementById('messageInput');
         const sendButton = document.getElementById('sendButton');
         const usernameInput = document.getElementById('usernameInput');
         const usersOnlineDiv = document.getElementById('usersOnline');
+        const connectionStatus = document.getElementById('connectionStatus');
 
-        function connectWebSocket() {
+        const MQTT_BROKER = 'ws://localhost:9001'; // WebSocket port for MQTT
+        const CHAT_TOPIC = 'chat/messages';
+        const STATUS_TOPIC = 'chat/status';
+
+        function connectMQTT() {
             const username = usernameInput.value;
             if (!username) {
                 alert("Por favor, digite um nome de usuário.");
                 return;
             }
 
+            currentUsername = username;
+
             // Fechar conexão existente, se houver
-            if (ws) {
-                ws.close();
+            if (mqttClient) {
+                mqttClient.end();
             }
 
-            ws = new WebSocket(`ws://localhost:8080/ws?username=${username}`);
+            // Conectar ao broker MQTT
+            mqttClient = mqtt.connect(MQTT_BROKER, {
+                clientId: `chat-client-${username}-${Date.now()}`,
+                clean: true,
+                connectTimeout: 4000,
+                reconnectPeriod: 1000,
+            });
 
-            ws.onopen = function() {
-                console.log('Conectado ao WebSocket');
+            mqttClient.on('connect', function() {
+                console.log('Conectado ao MQTT broker');
+                updateConnectionStatus(true);
                 messageInput.disabled = false;
                 sendButton.disabled = false;
-                fetchOnlineUsers(); // Busca usuários online ao conectar
-                loadHistoricalMessages(); // Carrega mensagens históricas ao conectar
-                setInterval(fetchOnlineUsers, 5000); // Atualiza usuários online a cada 5 segundos
-            };
 
-            ws.onmessage = function(event) {
-                console.log('Received WebSocket message:', event.data);
-                const data = JSON.parse(event.data);
-                console.log('Parsed data:', data);
+                // Subscrever aos tópicos
+                mqttClient.subscribe(CHAT_TOPIC, function(err) {
+                    if (!err) {
+                        console.log('Subscrito ao tópico de mensagens');
+                    }
+                });
+
+                mqttClient.subscribe(STATUS_TOPIC, function(err) {
+                    if (!err) {
+                        console.log('Subscrito ao tópico de status');
+                    }
+                });
+
+                // Publicar status online
+                publishUserStatus(true);
                 
-                if (data.type === 'user_status') {
-                    // Atualiza lista de usuários online
-                    console.log('Updating user status:', data.onlineUsers);
-                    updateOnlineUsers(data.onlineUsers);
-                } else if (data.Username && data.Content) {
-                    console.log('Displaying message:', data.Username, data.Content, data.Timestamp);
-                    displayMessage(data.Username, data.Content, data.Timestamp);
-                } else if (data.username && data.content) {
-                    console.log('Displaying message:', data.username, data.content, data.timestamp);
-                    displayMessage(data.username, data.content, data.timestamp);
-                } else {
-                    console.log('Unknown message format:', data);
-                }
-            };
+                // Carregar mensagens históricas
+                loadHistoricalMessages();
+            });
 
-            ws.onclose = function() {
-                console.log('Desconectado do WebSocket');
+            mqttClient.on('message', function(topic, message) {
+                console.log('Mensagem recebida:', topic, message.toString());
+                
+                if (topic === CHAT_TOPIC) {
+                    const data = JSON.parse(message.toString());
+                    // Só exibe se username e content forem válidos
+                    if (data.Username && data.Content) {
+                        displayMessage(data.Username, data.Content, data.Timestamp);
+                    } else if (data.username && data.content) {
+                        displayMessage(data.username, data.content, data.timestamp);
+                    }
+                } else if (topic === STATUS_TOPIC) {
+                    const data = JSON.parse(message.toString());
+                    handleUserStatus(data);
+                }
+            });
+
+            mqttClient.on('error', function(error) {
+                console.error('Erro MQTT:', error);
+                updateConnectionStatus(false);
+            });
+
+            mqttClient.on('close', function() {
+                console.log('Conexão MQTT fechada');
+                updateConnectionStatus(false);
                 messageInput.disabled = true;
                 sendButton.disabled = true;
-            };
+                publishUserStatus(false);
+            });
+        }
 
-            ws.onerror = function(error) {
-                console.error('Erro no WebSocket:', error);
-            };
+        function disconnectMQTT() {
+            if (mqttClient) {
+                publishUserStatus(false);
+                mqttClient.end();
+            }
+        }
+
+        function updateConnectionStatus(connected) {
+            if (connected) {
+                connectionStatus.textContent = 'Conectado ao MQTT';
+                connectionStatus.className = 'status connected';
+            } else {
+                connectionStatus.textContent = 'Desconectado';
+                connectionStatus.className = 'status disconnected';
+            }
+        }
+
+        function publishUserStatus(online) {
+            if (mqttClient && mqttClient.connected) {
+                const status = {
+                    username: currentUsername,
+                    online: online
+                };
+                mqttClient.publish(STATUS_TOPIC, JSON.stringify(status));
+            }
+        }
+
+        function handleUserStatus(data) {
+            // Atualizar lista de usuários online
+            // Por simplicidade, vamos buscar a lista completa via HTTP
+            fetchOnlineUsers();
         }
 
         function displayMessage(username, content, timestamp) {
+            // Não exibe mensagens inválidas
+            if (!username || !content) return;
+
             const messageElement = document.createElement('div');
             messageElement.classList.add('message');
 
-            const date = new Date(timestamp);
-            const timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+            let timeString = 'Agora';
+            if (timestamp) {
+                let date = new Date(timestamp);
+                if (!isNaN(date.getTime())) {
+                    timeString = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                }
+            }
 
             messageElement.innerHTML = `<span class="username">${username}:</span> ${content} <span class="timestamp">(${timeString})</span>`;
             chatbox.appendChild(messageElement);
-            chatbox.scrollTop = chatbox.scrollHeight; // Scroll para o final
+            chatbox.scrollTop = chatbox.scrollHeight;
         }
 
         function sendMessage() {
             const message = messageInput.value;
-            const username = usernameInput.value;
-            if (message.trim() === '') return;
+            if (message.trim() === '' || !mqttClient || !mqttClient.connected) return;
 
             const chatMessage = {
-                username: username,
+                username: currentUsername,
                 content: message
             };
-            ws.send(JSON.stringify(chatMessage));
+            
+            mqttClient.publish(CHAT_TOPIC, JSON.stringify(chatMessage));
             messageInput.value = '';
         }
 
@@ -164,9 +247,40 @@
                 .catch(error => console.error('Erro ao carregar mensagens históricas:', error));
         }
 
-        // Carregar mensagens históricas ao carregar a página (apenas se não estiver conectado)
+        // Função para buscar e exibir o histórico de atividades
+        function loadUserActivity() {
+            fetch('/user-activity')
+                .then(response => response.json())
+                .then(activities => {
+                    const box = document.getElementById('userActivityBox');
+                    if (!activities.length) {
+                        box.innerHTML = 'Nenhuma atividade registrada.';
+                        return;
+                    }
+                    box.innerHTML = '';
+                    activities.reverse().forEach(act => {
+                        let date = new Date(act.timestamp);
+                        let timeString = !isNaN(date.getTime()) ? date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) : 'Agora';
+                        const line = document.createElement('div');
+                        line.innerHTML = `<b>${act.username}</b> ficou <b>${act.eventType}</b> (${timeString})`;
+                        box.appendChild(line);
+                    });
+                })
+                .catch(error => {
+                    document.getElementById('userActivityBox').innerHTML = 'Erro ao carregar histórico.';
+                });
+        }
+
+        // Publicar status offline quando a página for fechada
+        window.addEventListener('beforeunload', function() {
+            if (mqttClient && mqttClient.connected) {
+                publishUserStatus(false);
+            }
+        });
+
+        // Carregar histórico ao abrir a página
         window.onload = function() {
-            // Não carrega mensagens aqui, elas serão carregadas quando conectar ao WebSocket
+            loadUserActivity();
         };
     </script>
 </body>

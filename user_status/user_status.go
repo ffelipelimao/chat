@@ -5,6 +5,8 @@ import (
 	"log"
 	"sync"
 
+	"chat-poc/db"
+
 	mqtt "github.com/eclipse/paho.mqtt.golang"
 )
 
@@ -30,6 +32,8 @@ func SetUserOnline(username string) {
 	mu.Lock()
 	defer mu.Unlock()
 	onlineUsers[username] = true
+	// Salva atividade no banco
+	db.SaveUserActivity(username, "online")
 }
 
 // SetUserOffline marca um usuário como offline
@@ -37,6 +41,8 @@ func SetUserOffline(username string) {
 	mu.Lock()
 	defer mu.Unlock()
 	delete(onlineUsers, username)
+	// Salva atividade no banco
+	db.SaveUserActivity(username, "offline")
 }
 
 // StatusHandler lida com as mensagens de status de usuário do MQTT

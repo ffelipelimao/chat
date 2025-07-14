@@ -66,6 +66,9 @@ func PublishMessage(username, content string) error {
 	if err != nil {
 		return err
 	}
+
+	log.Printf("Publishing message: %s", string(payload))
+
 	token := mqttClient.Publish(chatTopic, 1, false, payload)
 	token.Wait()
 	return token.Error()

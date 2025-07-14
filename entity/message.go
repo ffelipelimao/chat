@@ -3,9 +3,9 @@ package entity
 import "time"
 
 type Message struct {
-	Username  string
-	Content   string
-	Timestamp time.Time
+	Username  string    `json:"Username"`
+	Content   string    `json:"Content"`
+	Timestamp time.Time `json:"Timestamp"`
 }
 
 type UserActivity struct {
